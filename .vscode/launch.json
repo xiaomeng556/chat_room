@@ -1,0 +1,20 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+
+    {
+      "name": "Launch Backend",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/back_end/main.go",
+      "cwd": "${workspaceFolder}/back_end",
+      "dlvFlags": ["--check-go-version=false"],
+      "skipFiles": [
+        "${goroot}/src/runtime/*.go",
+        "${goroot}/src/net/http/*.go",
+        "${modroot}/**/*" // 跳过第三方依赖
+      ]
+    }
+  ]
+}
