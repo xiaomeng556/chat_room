@@ -20,11 +20,15 @@ const (
 
 // Client 表示一个连接的用户
 type Client struct {
-	ID   string
-	Conn *websocket.Conn
-	Send chan []byte
+	ID     string
+	UserID int64
+	Name   string
+	Avatar string
+	Conn   *websocket.Conn
+	Send   chan []byte
 }
 
+// NewClient 创建一个 WebSocket 客户端连接包装。
 func NewClient(id string, conn *websocket.Conn) *Client {
 	return &Client{
 		ID:   id,
@@ -35,13 +39,23 @@ func NewClient(id string, conn *websocket.Conn) *Client {
 
 // SendWelcome 发送欢迎消息，包含用户 ID
 func (c *Client) SendWelcome() {
-	msg := Message{
-		Type:    "welcome",
-		From:    "System",
-		To:      c.ID,
-		Content: "Welcome to the chat room!",
-		Time:    time.Now().Format("2006-01-02 15:04:05"),
+	msg := struct {
+		Type string `json:"type"`
+		To   string `json:"to"`
+		Time string `json:"time"`
+		User struct {
+			ID     int64  `json:"id"`
+			Name   string `json:"name"`
+			Avatar string `json:"avatar"`
+		} `json:"user"`
+	}{
+		Type: "welcome",
+		To:   c.ID,
+		Time: time.Now().Format("2006-01-02 15:04:05"),
 	}
+	msg.User.ID = c.UserID
+	msg.User.Name = c.Name
+	msg.User.Avatar = c.Avatar
 	jsonMsg, _ := json.Marshal(msg)
 	c.Send <- jsonMsg
 }
@@ -49,6 +63,7 @@ func (c *Client) SendWelcome() {
 // ReadPump 循环读取客户端发送的消息
 func (c *Client) ReadPump() {
 	defer func() {
+		// 触发 Manager 清理连接，并关闭底层 socket
 		Manager.Unregister <- c
 		c.Conn.Close()
 	}()
@@ -74,15 +89,45 @@ func (c *Client) ReadPump() {
 			continue
 		}
 
-		msg.From = c.ID // 确保发送者是当前连接的 ID
+		// 统一由服务端覆盖发送者身份，避免前端伪造
+		msg.From = c.ID
+		if msg.Avatar == "" {
+			msg.Avatar = c.Avatar
+		}
+		if msg.Time == "" {
+			msg.Time = time.Now().Format("15:04:05")
+		}
 
-		// TODO: 这里应该处理私聊逻辑，目前先全部广播
 		out, err := json.Marshal(msg)
 		if err != nil {
 			log.Printf("json marshal error: %v", err)
 			continue
 		}
-		Manager.Broadcast <- out
+
+		switch msg.Type {
+		case "join_room":
+			// 将当前连接加入某个房间（仅用于 WS 广播维度）
+			Manager.JoinRoom(msg.RoomID, c)
+		case "leave_room":
+			// 将当前连接移出房间
+			Manager.LeaveRoom(msg.RoomID, c)
+		case "room_public":
+			// 房间公聊：按 roomId 广播
+			if msg.RoomID > 0 {
+				Manager.BroadcastToRoom(msg.RoomID, out)
+			} else {
+				Manager.Broadcast <- out
+			}
+		case "private":
+			// 私聊：发送给目标用户（To）并回显给自己
+			if msg.To != "" {
+				Manager.SendToClientID(msg.To, out)
+			}
+			Manager.SendToClientID(c.ID, out)
+		default:
+			// 默认按全局广播处理（兼容历史 type：public/private/system）
+			Manager.Broadcast <- out
+		}
 	}
 }
 
@@ -103,10 +148,12 @@ func (c *Client) WritePump() {
 				return
 			}
 
+			// 每条消息单独作为一帧发送，避免多个 JSON 被拼接导致前端 JSON.parse 失败
 			if err := c.Conn.WriteMessage(websocket.TextMessage, message); err != nil {
 				return
 			}
 
+			// 顺带清空队列中已堆积的数据（仍逐条写出），降低延迟
 			n := len(c.Send)
 			for i := 0; i < n; i++ {
 				if err := c.Conn.WriteMessage(websocket.TextMessage, <-c.Send); err != nil {
