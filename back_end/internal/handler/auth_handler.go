@@ -67,7 +67,7 @@ func (h *Handler) Register(c *gin.Context) {
 		return
 	}
 
-	token, err := h.JWT.GenerateToken(u.ID, u.Username, 24*time.Hour)
+	token, err := h.JWT.GenerateToken(u.ID, u.Username, 24*time.Hour) // 24小时过期
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "token failed"})
 		return

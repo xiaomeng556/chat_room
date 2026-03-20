@@ -1,8 +1,12 @@
 package websocket
 
 import (
+	"chat_room/internal/repo"
+	"context"
+	"database/sql"
 	"encoding/json"
 	"log"
+	"strconv"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -115,6 +119,14 @@ func (c *Client) ReadPump() {
 			// 房间公聊：按 roomId 广播
 			if msg.RoomID > 0 {
 				Manager.BroadcastToRoom(msg.RoomID, out)
+				// 存储消息到数据库
+				if c.UserID > 0 && Manager.DB != nil {
+					ctx := context.Background()
+					_, err := repo.CreateMessage(ctx, Manager.DB, msg.RoomID, c.UserID, sql.NullInt64{}, 1, msg.Content)
+					if err != nil {
+						log.Printf("create message error: %v", err)
+					}
+				}
 			} else {
 				Manager.Broadcast <- out
 			}
@@ -124,6 +136,23 @@ func (c *Client) ReadPump() {
 				Manager.SendToClientID(msg.To, out)
 			}
 			Manager.SendToClientID(c.ID, out)
+			// 存储私聊消息到数据库
+			if c.UserID > 0 && Manager.DB != nil && msg.To != "" {
+				ctx := context.Background()
+				// 解析接收者用户ID
+				var toUserID int64
+				if len(msg.To) > 2 && msg.To[:2] == "u_" {
+					if id, err := strconv.ParseInt(msg.To[2:], 10, 64); err == nil {
+						toUserID = id
+					}
+				}
+				if toUserID > 0 {
+					_, err := repo.CreateMessage(ctx, Manager.DB, 0, c.UserID, sql.NullInt64{Int64: toUserID, Valid: true}, 2, msg.Content)
+					if err != nil {
+						log.Printf("create private message error: %v", err)
+					}
+				}
+			}
 		default:
 			// 默认按全局广播处理（兼容历史 type：public/private/system）
 			Manager.Broadcast <- out

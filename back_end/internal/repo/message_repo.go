@@ -10,7 +10,7 @@ type Message struct {
 	ID         int64
 	RoomID     int64
 	FromUserID int64
-	ToUserID   sql.NullInt64
+	ToUserID   *int64
 	MsgType    int
 	Content    string
 	CreatedAt  time.Time
@@ -35,12 +35,16 @@ func CreateMessage(ctx context.Context, db *sql.DB, roomID, fromUserID int64, to
 // GetMessageByID 根据消息 id 查询消息。
 func GetMessageByID(ctx context.Context, db *sql.DB, id int64) (Message, error) {
 	var m Message
+	var toUserID sql.NullInt64
 	err := db.QueryRowContext(ctx,
 		`SELECT id, room_id, from_user_id, to_user_id, msg_type, content, created_at FROM messages WHERE id = ?`,
 		id,
-	).Scan(&m.ID, &m.RoomID, &m.FromUserID, &m.ToUserID, &m.MsgType, &m.Content, &m.CreatedAt)
+	).Scan(&m.ID, &m.RoomID, &m.FromUserID, &toUserID, &m.MsgType, &m.Content, &m.CreatedAt)
 	if err != nil {
 		return Message{}, err
+	}
+	if toUserID.Valid {
+		m.ToUserID = &toUserID.Int64
 	}
 	return m, nil
 }
@@ -57,21 +61,25 @@ func ListRoomMessages(ctx context.Context, db *sql.DB, roomID int64, before time
 	rows, err := db.QueryContext(ctx,
 		`SELECT id, room_id, from_user_id, to_user_id, msg_type, content, created_at
 		 FROM messages
-		 WHERE room_id = ? AND created_at < ?
+		 WHERE room_id = ?
 		 ORDER BY created_at DESC
 		 LIMIT ?`,
-		roomID, before, limit,
+		roomID, limit,
 	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var msgs []Message
+	msgs := make([]Message, 0)
 	for rows.Next() {
 		var m Message
-		if err := rows.Scan(&m.ID, &m.RoomID, &m.FromUserID, &m.ToUserID, &m.MsgType, &m.Content, &m.CreatedAt); err != nil {
+		var toUserID sql.NullInt64
+		if err := rows.Scan(&m.ID, &m.RoomID, &m.FromUserID, &toUserID, &m.MsgType, &m.Content, &m.CreatedAt); err != nil {
 			return nil, err
+		}
+		if toUserID.Valid {
+			m.ToUserID = &toUserID.Int64
 		}
 		msgs = append(msgs, m)
 	}

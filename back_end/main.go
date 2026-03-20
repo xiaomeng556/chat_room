@@ -42,6 +42,7 @@ func main() {
 	h := handler.New(db, jwtSvc)
 
 	// 启动 WebSocket 管理器
+	websocket.Manager.SetDB(db)
 	go websocket.Manager.Start()
 
 	// 初始化 Gin

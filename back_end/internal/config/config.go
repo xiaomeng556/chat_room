@@ -22,7 +22,7 @@ type Config struct {
 func Load() Config {
 	return Config{
 		ServerAddr:    getEnv("SERVER_ADDR", ":8888"),
-		MySQLDSN:      getEnv("MYSQL_DSN", ""),
+		MySQLDSN:      getEnv("MYSQL_DSN", "root:1234@tcp(127.0.0.1:3306)/chat_room?parseTime=true"),
 		RedisAddr:     getEnv("REDIS_ADDR", "127.0.0.1:6379"),
 		RedisPassword: getEnv("REDIS_PASSWORD", ""),
 		RedisDB:       getEnv("REDIS_DB", "0"),

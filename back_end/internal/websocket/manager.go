@@ -2,6 +2,7 @@ package websocket
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"log"
 	"sync"
@@ -29,6 +30,7 @@ type ClientManager struct {
 	Lock       sync.RWMutex
 	Presence   presence.Store
 	Rooms      map[int64]map[*Client]bool
+	DB         *sql.DB
 }
 
 var Manager = ClientManager{
@@ -228,4 +230,9 @@ func (manager *ClientManager) SendToClientID(clientID string, message []byte) {
 	for _, c := range clients {
 		c.Send <- message
 	}
+}
+
+// SetDB 设置数据库连接
+func (manager *ClientManager) SetDB(db *sql.DB) {
+	manager.DB = db
 }

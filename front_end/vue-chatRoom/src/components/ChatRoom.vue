@@ -14,7 +14,8 @@ interface Room {
   id: number
   name: string
   type: number
-  ownerUserID: number
+  owner_user_id?: number
+  ownerUserID?: number
 }
 
 interface Me {
@@ -22,6 +23,7 @@ interface Me {
   username: string
   nickname: string
   avatar: string
+  avatar_url?: string
 }
 
 interface Message {
@@ -63,6 +65,10 @@ const activeKey = computed(() => {
   if (selectedUser.value) return `private:${selectedUser.value.id}`
   if (activeRoomId.value) return `room:${activeRoomId.value}`
   return 'room:0'
+})
+
+const isSocketOpen = computed(() => {
+  return socket !== null && socket.readyState === WebSocket.OPEN
 })
 
 const visibleMessages = computed<Message[]>(() => {
@@ -171,10 +177,16 @@ const handleMessage = (data: any) => {
 
   if (data.type === 'room_public') {
     const roomId = Number(data.roomId ?? 0)
+    // 查找用户昵称
+    let fromName = data.from
+    const user = onlineUsers.value.find(u => u.id === data.from)
+    if (user) fromName = user.name
+    else if (data.from === currentUser.value.id) fromName = currentUser.value.name
+    
     const msg: Message = {
       id: Date.now().toString(),
       type: 'room_public',
-      from: data.from,
+      from: fromName,
       roomId,
       content: data.content ?? '',
       time: data.time ?? '',
@@ -188,11 +200,17 @@ const handleMessage = (data: any) => {
   if (data.type === 'private') {
     const isSelf = data.from === currentUser.value.id
     const peerId = isSelf ? data.to : data.from
+    // 查找用户昵称
+    let fromName = data.from
+    const user = onlineUsers.value.find(u => u.id === data.from)
+    if (user) fromName = user.name
+    else if (data.from === currentUser.value.id) fromName = currentUser.value.name
+    
     const key = `private:${peerId}`
     const msg: Message = {
       id: Date.now().toString(),
       type: 'private',
-      from: data.from,
+      from: fromName,
       to: data.to,
       content: data.content ?? '',
       time: data.time ?? '',
@@ -211,16 +229,29 @@ const loadInitial = async () => {
     currentUser.value = {
       id: `u_${me.id}`,
       name: me.nickname || me.username,
-      avatar: me.avatar,
+      avatar: me.avatar || me.avatar_url || '',
       status: 'online'
     }
 
-    rooms.value = await apiFetch<Room[]>('/api/rooms')
-    if (rooms.value.length) {
-      await selectRoom(rooms.value[0])
+    const response = await apiFetch<any>('/api/rooms')
+    if (Array.isArray(response)) {
+      // 转换后端返回的大写字段名为小写
+      rooms.value = response.map((room: any) => ({
+        id: room.ID || room.id,
+        name: room.Name || room.name,
+        type: room.Type || room.type,
+        ownerUserID: room.OwnerUserID || room.ownerUserID || room.owner_user_id
+      }))
+      if (rooms.value.length && rooms.value[0]) {
+        await selectRoom(rooms.value[0])
+      }
+    } else {
+      rooms.value = []
+      console.error('Rooms response is not an array:', response)
     }
   } catch (e: any) {
     error.value = e?.message ?? '加载失败，请刷新页面重试'
+    rooms.value = []
     console.error('Load initial error:', e)
   } finally {
     loading.value = false
@@ -229,6 +260,13 @@ const loadInitial = async () => {
 
 const selectRoom = async (room: Room) => {
   selectedUser.value = null
+  
+  // 检查 room.id 是否有效
+  if (!room.id || typeof room.id !== 'number' || room.id <= 0) {
+    console.error('Invalid room ID:', room.id)
+    return
+  }
+  
   activeRoomId.value = room.id
 
   const key = `room:${room.id}`
@@ -396,7 +434,7 @@ onUnmounted(() => {
         <div class="text-xs text-gray-500" v-if="!selectedUser && activeRoomId">RoomID: {{ activeRoomId }}</div>
       </div>
 
-      <div ref="messagesContainer" class="flex-1 overflow-y-auto p-6 space-y-4">
+      <div ref="messagesContainer" class="flex-1 overflow-y-auto p-6 space-y-4 pb-2">
         <div v-if="loading" class="flex justify-center items-center h-32">
           <div class="text-sm text-gray-500">加载中...</div>
         </div>
@@ -434,7 +472,7 @@ onUnmounted(() => {
           <button
             @click="sendMessage"
             class="px-6 py-2 bg-blue-500 text-white rounded-full hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            :disabled="!inputMessage.trim() || (!selectedUser && !activeRoomId) || !socket || socket.readyState !== WebSocket.OPEN"
+            :disabled="!inputMessage.trim() || (!selectedUser && !activeRoomId) || !isSocketOpen"
           >
             发送
           </button>
